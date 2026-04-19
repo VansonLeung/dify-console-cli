@@ -76,28 +76,47 @@ function buildAuthHeaders({ token, csrfToken, cookieHeader }) {
   };
   if (cookieHeader) headers.Cookie = cookieHeader;
   if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
+  console.log('   → Built auth headers with token and cookies');
+  console.log(`      Authorization: Bearer ${token.slice(0, 8)}...${token.slice(-8)}`);
+  console.log(`      Cookie: ${cookieHeader ? cookieHeader.split(';')[0] + '...' : 'none'}`);
+  console.log(`      X-CSRF-Token: ${csrfToken ? csrfToken.slice(0, 8) + '...' + csrfToken.slice(-8) : 'none'}`);
   return headers;
 }
 
 async function getCurrentWorkspace(auth) {
-  const res = await axios.post(`${DIFY_BASE}/console/api/workspaces/current`, {}, {
-    headers: buildAuthHeaders(auth),
-  });
-  console.log('📍 Current workspace:', res.data.name || res.data.id);
-  return res.data;
+  try {
+    const res = await axios.post(`${DIFY_BASE}/console/api/workspaces/current`, {}, {
+      headers: buildAuthHeaders(auth),
+      timeout: 10000,
+    });
+    const workspace = res.data.data || res.data.currentWorkspace || res.data.workspace || res.data;
+    console.log('📍 Current workspace:', workspace?.name || workspace?.id || JSON.stringify(workspace));
+    return workspace;
+  } catch (err) {
+    if (err.response?.status === 404 || err.response?.status === 405) {
+      const workspaces = await listAllWorkspaces(auth);
+      const current = workspaces.find(ws => ws.current) || workspaces[0] || null;
+      console.log('📍 Current workspace fallback:', current?.name || current?.id || 'none');
+      return current;
+    }
+    throw err;
+  }
 }
 
 async function listAllWorkspaces(auth) {
   try {
     const res = await axios.get(`${DIFY_BASE}/console/api/workspaces`, {
-        headers: buildAuthHeaders(auth),
+      headers: buildAuthHeaders(auth),
+      timeout: 10000,
     });
-    const workspaces = res.data.data || res.data || [];
-    console.log(`📋 Found ${workspaces.length} workspace(s):`);
-    workspaces.forEach(ws => {
-      console.log(`   - ${ws.name} (ID: ${ws.id}) ${ws.id === ws.current_tenant_id ? '(current)' : ''}`);
+    const data = res.data;
+    const workspaces = data.workspaces || data.data || data || [];
+    const list = Array.isArray(workspaces) ? workspaces : [];
+    console.log(`📋 Found ${list.length} workspace(s):`);
+    list.forEach(ws => {
+      console.log(`   - ${ws.name} (ID: ${ws.id}) ${ws.current ? '(current)' : ''}`);
     });
-    return workspaces;
+    return list;
   } catch (err) {
     console.log('⚠️  Could not list all workspaces (single-workspace deployment?):', err.response?.status, err.response?.data);
     return [];
